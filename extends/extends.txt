@@ -1,0 +1,1340 @@
+Frontend (client)
+
+client/
+├── components/
+│   ├── Posts/
+│   ├── Form/
+│   ├── Auth/
+│   ├── Profile/
+│   └── Feed/
+├── api/
+│   ├── posts.js
+│   ├── users.js
+│   └── auth.js
+├── reducers/
+│   ├── posts.js
+│   └── auth.js
+└── App.js, index.js, etc.
+
+
+Backend(server)
+
+
+server/
+├── controllers/
+│   ├── posts.js
+│   ├── users.js
+│   └── auth.js
+├── models/
+│   ├── Post.js
+│   └── User.js
+├── routes/
+│   ├── posts.js
+│   ├── users.js
+│   └── auth.js
+├── middleware/
+│   └── auth.js
+└── index.js (Express setup)
+
+
+models/User.js
+
+
+import mongoose from 'mongoose';
+
+const userSchema = mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  bio: { type: String, default: '' },
+  profilePic: { type: String, default: '' },
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  likedPosts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Post' }],
+  otp: String,
+  otpExpires: Date,
+});
+
+export default mongoose.model('User', userSchema);
+
+
+
+routes/auth.js
+
+import express from 'express';
+import { signup, login } from '../controllers/auth.js';
+
+const router = express.Router();
+
+router.post('/signup', signup);
+router.post('/login', login);
+
+export default router;
+
+
+
+controllers/auth.js
+
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
+
+const secret = 'secretkey'; // move this to .env in production
+
+export const signup = async (req, res) => {
+  const { name, email, password } = req.body;
+
+  try {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ message: 'User already exists.' });
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const result = await User.create({ email, password: hashedPassword, name });
+
+    const token = jwt.sign({ email: result.email, id: result._id }, secret, { expiresIn: '1h' });
+
+    res.status(201).json({ result, token });
+  } catch (error) {
+    res.status(500).json({ message: 'Something went wrong.' });
+  }
+};
+
+export const login = async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const existingUser = await User.findOne({ email });
+    if (!existingUser) return res.status(404).json({ message: 'User not found.' });
+
+    const isPasswordCorrect = await bcrypt.compare(password, existingUser.password);
+    if (!isPasswordCorrect) return res.status(400).json({ message: 'Invalid credentials.' });
+
+    const token = jwt.sign({ email: existingUser.email, id: existingUser._id }, secret, { expiresIn: '1h' });
+
+    res.status(200).json({ result: existingUser, token });
+  } catch (error) {
+    res.status(500).json({ message: 'Something went wrong.' });
+  }
+};
+
+
+
+middleware/auth.js
+
+import jwt from 'jsonwebtoken';
+
+const secret = 'secretkey';
+
+const auth = async (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ message: 'Unauthorized' });
+
+    const decoded = jwt.verify(token, secret);
+    req.userId = decoded.id;
+
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Token invalid or expired' });
+  }
+};
+
+export default auth;
+
+
+server/index.js
+
+import authRoutes from './routes/auth.js';
+app.use('/auth', authRoutes);
+
+
+client/api/auth.js
+
+import axios from 'axios';
+
+const API = axios.create({ baseURL: 'http://localhost:5000' });
+
+export const signUp = (formData) => API.post('/auth/signup', formData);
+export const signIn = (formData) => API.post('/auth/login', formData);
+
+
+
+client/components/Auth/Auth.js
+
+
+import React, { useState } from 'react';
+import { signIn, signUp } from '../../api/auth';
+import { useNavigate } from 'react-router-dom';
+
+const Auth = () => {
+  const navigate = useNavigate();
+  const [isSignup, setIsSignup] = useState(false);
+  const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const { data } = isSignup
+        ? await signUp(formData)
+        : await signIn(formData);
+
+      localStorage.setItem('profile', JSON.stringify(data));
+      navigate('/');
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+
+  return (
+    <div>
+      <h2>{isSignup ? 'Sign Up' : 'Sign In'}</h2>
+      <form onSubmit={handleSubmit}>
+        {isSignup && <input name="name" placeholder="Name" onChange={handleChange} />}
+        <input name="email" placeholder="Email" onChange={handleChange} />
+        <input name="password" type="password" placeholder="Password" onChange={handleChange} />
+        <button type="submit">{isSignup ? 'Sign Up' : 'Sign In'}</button>
+      </form>
+      <button onClick={() => setIsSignup((prev) => !prev)}>
+        {isSignup ? 'Already have an account?' : 'Don’t have an account?'}
+      </button>
+    </div>
+  );
+};
+
+export default Auth;
+
+
+Protect Routes using Auth
+Use localStorage.getItem('profile') and JWT decoding to check for authentication.
+
+
+In your server folder:
+
+npm install nodemailer
+
+
+Update User model — models/User.js
+Already includes OTP and otpExpires, so you're good:
+
+otp: String,
+otpExpires: Date,
+
+
+
+Update controllers/auth.js
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
+import nodemailer from 'nodemailer';
+
+const secret = 'secretkey';
+
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: 'your-email@gmail.com',       // <--- CHANGE THIS
+    pass: 'your-app-password',          // <--- USE GMAIL APP PASSWORD
+  },
+});
+
+const sendOTP = async (email, otp) => {
+  await transporter.sendMail({
+    from: '"Memories App" <your-email@gmail.com>',
+    to: email,
+    subject: 'OTP Verification',
+    text: `Your OTP is ${otp}. It will expire in 5 minutes.`,
+  });
+};
+
+export const signup = async (req, res) => {
+  const { name, email, password } = req.body;
+
+  try {
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(400).json({ message: 'User already exists.' });
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpires = new Date(Date.now() + 5 * 60 * 1000); // 5 mins
+
+    const user = await User.create({
+      email,
+      password: hashedPassword,
+      name,
+      otp,
+      otpExpires,
+    });
+
+    await sendOTP(email, otp);
+
+    res.status(201).json({ message: 'OTP sent to email. Please verify.', userId: user._id });
+  } catch (error) {
+    res.status(500).json({ message: 'Something went wrong.' });
+  }
+};
+
+export const verifyOtp = async (req, res) => {
+  const { userId, otp } = req.body;
+
+  try {
+    const user = await User.findById(userId);
+
+    if (!user || user.otp !== otp || user.otpExpires < new Date()) {
+      return res.status(400).json({ message: 'Invalid or expired OTP.' });
+    }
+
+    // Clear OTP after verification
+    user.otp = null;
+    user.otpExpires = null;
+    await user.save();
+
+    const token = jwt.sign({ email: user.email, id: user._id }, secret, { expiresIn: '1h' });
+
+    res.status(200).json({ result: user, token });
+  } catch (error) {
+    res.status(500).json({ message: 'OTP verification failed.' });
+  }
+};
+
+export const login = async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ message: 'User not found.' });
+
+    if (user.otp) {
+      return res.status(403).json({ message: 'OTP not verified yet.' });
+    }
+
+    const isPasswordCorrect = await bcrypt.compare(password, user.password);
+    if (!isPasswordCorrect) return res.status(400).json({ message: 'Invalid credentials.' });
+
+    const token = jwt.sign({ email: user.email, id: user._id }, secret, { expiresIn: '1h' });
+
+    res.status(200).json({ result: user, token });
+  } catch (error) {
+    res.status(500).json({ message: 'Something went wrong.' });
+  }
+};
+
+
+Add route to routes/auth.js
+router.post('/verify-otp', verifyOtp); // <-- add this
+
+
+Add OTP field after Signup — components/Auth/Auth.js
+
+import React, { useState } from 'react';
+import { signIn, signUp, verifyOtp } from '../../api/auth';
+import { useNavigate } from 'react-router-dom';
+
+const Auth = () => {
+  const navigate = useNavigate();
+  const [isSignup, setIsSignup] = useState(false);
+  const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+  const [showOtpInput, setShowOtpInput] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [tempUserId, setTempUserId] = useState(null);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      if (showOtpInput) {
+        const { data } = await verifyOtp({ userId: tempUserId, otp });
+        localStorage.setItem('profile', JSON.stringify(data));
+        navigate('/');
+      } else {
+        if (isSignup) {
+          const { data } = await signUp(formData);
+          setTempUserId(data.userId);
+          setShowOtpInput(true);
+        } else {
+          const { data } = await signIn(formData);
+          localStorage.setItem('profile', JSON.stringify(data));
+          navigate('/');
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+
+  return (
+    <div>
+      <h2>{isSignup ? 'Sign Up' : 'Sign In'}</h2>
+      <form onSubmit={handleSubmit}>
+        {showOtpInput ? (
+          <>
+            <input
+              placeholder="Enter OTP"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value)}
+            />
+            <button type="submit">Verify OTP</button>
+          </>
+        ) : (
+          <>
+            {isSignup && <input name="name" placeholder="Name" onChange={handleChange} />}
+            <input name="email" placeholder="Email" onChange={handleChange} />
+            <input name="password" type="password" placeholder="Password" onChange={handleChange} />
+            <button type="submit">{isSignup ? 'Sign Up' : 'Sign In'}</button>
+          </>
+        )}
+      </form>
+      {!showOtpInput && (
+        <button onClick={() => setIsSignup((prev) => !prev)}>
+          {isSignup ? 'Already have an account?' : 'Don’t have an account?'}
+        </button>
+      )}
+    </div>
+  );
+};
+
+export default Auth;
+
+
+Update api/auth.js
+
+import axios from 'axios';
+
+const API = axios.create({ baseURL: 'http://localhost:5000' });
+
+export const signUp = (formData) => API.post('/auth/signup', formData);
+export const signIn = (formData) => API.post('/auth/login', formData);
+export const verifyOtp = (otpData) => API.post('/auth/verify-otp', otpData);
+
+
+Features:
+Send friend request
+
+Accept/reject requests
+
+View friends list
+
+Unfriend
+
+Backend validations
+
+
+
+Update User Model — models/User.js
+
+const userSchema = mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  bio: { type: String, default: '' },
+  profilePic: { type: String, default: '' },
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  friendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  otp: String,
+  otpExpires: Date,
+});
+
+
+routes/friends.js
+
+import express from 'express';
+import auth from '../middleware/auth.js';
+import {
+  sendFriendRequest,
+  acceptFriendRequest,
+  removeFriend,
+  getFriends,
+  getRequests,
+} from '../controllers/friends.js';
+
+const router = express.Router();
+
+router.post('/send/:id', auth, sendFriendRequest);
+router.post('/accept/:id', auth, acceptFriendRequest);
+router.delete('/remove/:id', auth, removeFriend);
+router.get('/list', auth, getFriends);
+router.get('/requests', auth, getRequests);
+
+export default router;
+
+
+controllers/friends.js
+import User from '../models/User.js';
+
+export const sendFriendRequest = async (req, res) => {
+  const targetId = req.params.id;
+  const userId = req.userId;
+
+  if (targetId === userId) return res.status(400).json({ message: "You can't friend yourself." });
+
+  const user = await User.findById(userId);
+  const target = await User.findById(targetId);
+
+  if (!user || !target) return res.status(404).json({ message: 'User not found.' });
+
+  if (target.friendRequests.includes(userId)) {
+    return res.status(400).json({ message: 'Friend request already sent.' });
+  }
+
+  if (target.friends.includes(userId)) {
+    return res.status(400).json({ message: 'Already friends.' });
+  }
+
+  target.friendRequests.push(userId);
+  await target.save();
+
+  res.status(200).json({ message: 'Friend request sent.' });
+};
+
+export const acceptFriendRequest = async (req, res) => {
+  const requesterId = req.params.id;
+  const userId = req.userId;
+
+  const user = await User.findById(userId);
+  const requester = await User.findById(requesterId);
+
+  if (!user || !requester) return res.status(404).json({ message: 'User not found.' });
+
+  if (!user.friendRequests.includes(requesterId)) {
+    return res.status(400).json({ message: 'No friend request from this user.' });
+  }
+
+  user.friendRequests = user.friendRequests.filter(id => id.toString() !== requesterId);
+  user.friends.push(requesterId);
+  requester.friends.push(userId);
+
+  await user.save();
+  await requester.save();
+
+  res.status(200).json({ message: 'Friend request accepted.' });
+};
+
+export const removeFriend = async (req, res) => {
+  const friendId = req.params.id;
+  const userId = req.userId;
+
+  const user = await User.findById(userId);
+  const friend = await User.findById(friendId);
+
+  if (!user || !friend) return res.status(404).json({ message: 'User not found.' });
+
+  user.friends = user.friends.filter(id => id.toString() !== friendId);
+  friend.friends = friend.friends.filter(id => id.toString() !== userId);
+
+  await user.save();
+  await friend.save();
+
+  res.status(200).json({ message: 'Friend removed.' });
+};
+
+export const getFriends = async (req, res) => {
+  const user = await User.findById(req.userId).populate('friends', 'name profilePic');
+  res.status(200).json(user.friends);
+};
+
+export const getRequests = async (req, res) => {
+  const user = await User.findById(req.userId).populate('friendRequests', 'name profilePic');
+  res.status(200).json(user.friendRequests);
+};
+
+
+Add Route to index.js (server entry)
+
+import friendRoutes from './routes/friends.js';
+app.use('/friends', friendRoutes);
+
+
+
+API Calls — client/api/friends.js
+
+import axios from 'axios';
+
+const API = axios.create({ baseURL: 'http://localhost:5000' });
+API.interceptors.request.use((req) => {
+  const profile = localStorage.getItem('profile');
+  if (profile) {
+    req.headers.Authorization = `Bearer ${JSON.parse(profile).token}`;
+  }
+  return req;
+});
+
+export const sendRequest = (id) => API.post(`/friends/send/${id}`);
+export const acceptRequest = (id) => API.post(`/friends/accept/${id}`);
+export const removeFriend = (id) => API.delete(`/friends/remove/${id}`);
+export const getFriends = () => API.get('/friends/list');
+export const getRequests = () => API.get('/friends/requests');
+
+
+
+UI Idea — Friend List / Requests (Add this wherever needed)
+
+import React, { useEffect, useState } from 'react';
+import { getFriends, getRequests, sendRequest, acceptRequest, removeFriend } from '../../api/friends';
+
+const Friends = () => {
+  const [friends, setFriends] = useState([]);
+  const [requests, setRequests] = useState([]);
+
+  useEffect(() => {
+    getFriends().then((res) => setFriends(res.data));
+    getRequests().then((res) => setRequests(res.data));
+  }, []);
+
+  return (
+    <div>
+      <h2>Friends</h2>
+      {friends.map((f) => (
+        <div key={f._id}>
+          {f.name}
+          <button onClick={() => removeFriend(f._id)}>Unfriend</button>
+        </div>
+      ))}
+
+      <h2>Friend Requests</h2>
+      {requests.map((r) => (
+        <div key={r._id}>
+          {r.name}
+          <button onClick={() => acceptRequest(r._id)}>Accept</button>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default Friends;
+
+
+Modify getPosts in controllers/posts.js
+
+import PostMessage from '../models/postMessage.js';
+import User from '../models/User.js';
+
+export const getPosts = async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(401).json({ message: 'Unauthorized' });
+
+    const friendIds = user.friends.map((id) => id.toString());
+
+    const posts = await PostMessage.find({ creatorId: { $in: [...friendIds, req.userId] } }).sort({ createdAt: -1 });
+
+    res.status(200).json(posts);
+  } catch (error) {
+    res.status(404).json({ message: error.message });
+  }
+};
+
+🔍 Assumes you're saving creatorId (not just name) when creating posts. If not, update it 
+
+
+Update Post Create Controller — createPost
+
+export const createPost = async (req, res) => {
+  const post = req.body;
+
+  const newPost = new PostMessage({
+    ...post,
+    creatorId: req.userId, // Add this!
+    createdAt: new Date().toISOString(),
+  });
+
+  try {
+    await newPost.save();
+    res.status(201).json(newPost);
+  } catch (error) {
+    res.status(409).json({ message: error.message });
+  }
+};
+
+ Update Post Model — models/postMessage.js
+
+ const postSchema = mongoose.Schema({
+  title: String,
+  message: String,
+  name: String,
+  tags: [String],
+  selectedFile: String,
+  likes: { type: [String], default: [] },
+  creatorId: String, // <- ADD THIS
+  createdAt: {
+    type: Date,
+    default: new Date(),
+  },
+});
+
+
+Update api/index.js to include auth headers
+
+postsAPI.interceptors.request.use((req) => {
+  const profile = localStorage.getItem('profile');
+  if (profile) {
+    req.headers.Authorization = `Bearer ${JSON.parse(profile).token}`;
+  }
+  return req;
+});
+
+
+Posts Component — already works!
+Because the backend now returns only friends’ posts, your existing Posts.js (that maps posts) automatically becomes a Friends Feed.
+
+✅ No frontend changes needed for this feature.
+
+
+Features:
+Add/update bio and profile picture
+
+View your own profile
+
+View other users’ profiles
+
+(Optional later: mutual friends, memories count, etc.)
+
+
+Already Updated User Schema (just for clarity)
+
+const userSchema = mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  bio: { type: String, default: '' },
+  profilePic: { type: String, default: '' },
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  friendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  otp: String,
+  otpExpires: Date,
+});
+
+
+Add Profile Routes — routes/profile.js
+
+import express from 'express';
+import auth from '../middleware/auth.js';
+import { getMyProfile, getUserProfile, updateProfile } from '../controllers/profile.js';
+
+const router = express.Router();
+
+router.get('/me', auth, getMyProfile);
+router.get('/:id', auth, getUserProfile);
+router.patch('/update', auth, updateProfile);
+
+export default router;
+
+
+Add Controller — controllers/profile.js
+
+
+import User from '../models/User.js';
+
+export const getMyProfile = async (req, res) => {
+  const user = await User.findById(req.userId).select('-password -otp -otpExpires');
+  res.status(200).json(user);
+};
+
+export const getUserProfile = async (req, res) => {
+  const user = await User.findById(req.params.id).select('name bio profilePic friends');
+  if (!user) return res.status(404).json({ message: 'User not found' });
+  res.status(200).json(user);
+};
+
+export const updateProfile = async (req, res) => {
+  const { bio, profilePic } = req.body;
+  const user = await User.findByIdAndUpdate(req.userId, { bio, profilePic }, { new: true }).select('-password');
+  res.status(200).json(user);
+};
+
+Hook It Up in index.js
+
+import profileRoutes from './routes/profile.js';
+app.use('/profile', profileRoutes);
+
+
+API File — client/api/profile.js
+
+import axios from 'axios';
+
+const API = axios.create({ baseURL: 'http://localhost:5000' });
+API.interceptors.request.use((req) => {
+  const profile = localStorage.getItem('profile');
+  if (profile) {
+    req.headers.Authorization = `Bearer ${JSON.parse(profile).token}`;
+  }
+  return req;
+});
+
+export const fetchMyProfile = () => API.get('/profile/me');
+export const fetchUserProfile = (id) => API.get(`/profile/${id}`);
+export const updateMyProfile = (data) => API.patch('/profile/update', data);
+
+
+ Profile Page UI — components/Profile.js
+
+
+ import React, { useEffect, useState } from 'react';
+import { fetchMyProfile, updateMyProfile } from '../api/profile';
+
+const Profile = () => {
+  const [profile, setProfile] = useState(null);
+  const [editMode, setEditMode] = useState(false);
+  const [form, setForm] = useState({ bio: '', profilePic: '' });
+
+  useEffect(() => {
+    fetchMyProfile().then(res => {
+      setProfile(res.data);
+      setForm({ bio: res.data.bio, profilePic: res.data.profilePic });
+    });
+  }, []);
+
+  const handleUpdate = () => {
+    updateMyProfile(form).then((res) => {
+      setProfile(res.data);
+      setEditMode(false);
+    });
+  };
+
+  if (!profile) return <div>Loading...</div>;
+
+  return (
+    <div style={{ padding: '1rem' }}>
+      <h2>My Profile</h2>
+      <img src={profile.profilePic || 'https://via.placeholder.com/150'} alt="Profile" width="150" />
+      {editMode ? (
+        <div>
+          <input
+            type="text"
+            placeholder="Profile Picture URL"
+            value={form.profilePic}
+            onChange={(e) => setForm({ ...form, profilePic: e.target.value })}
+          />
+          <textarea
+            placeholder="Bio"
+            value={form.bio}
+            onChange={(e) => setForm({ ...form, bio: e.target.value })}
+          />
+          <button onClick={handleUpdate}>Save</button>
+        </div>
+      ) : (
+        <>
+          <p><strong>Name:</strong> {profile.name}</p>
+          <p><strong>Bio:</strong> {profile.bio}</p>
+          <button onClick={() => setEditMode(true)}>Edit Profile</button>
+        </>
+      )}
+    </div>
+  );
+};
+
+export default Profile;
+
+
+Features:
+Each user can like a post only once
+
+Toggle like (like/unlike)
+
+Post stores array of userIds who liked it
+
+
+
+Update likePost in controllers/posts.js
+
+
+export const likePost = async (req, res) => {
+  const { id } = req.params;
+  const userId = req.userId;
+
+  if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+  const post = await PostMessage.findById(id);
+  if (!post) return res.status(404).json({ message: 'Post not found' });
+
+  const index = post.likes.findIndex((id) => id === String(userId));
+
+  if (index === -1) {
+    // not liked yet
+    post.likes.push(userId);
+  } else {
+    // already liked
+    post.likes = post.likes.filter((id) => id !== String(userId));
+  }
+
+  const updatedPost = await post.save();
+  res.status(200).json(updatedPost);
+};
+
+
+Ensure likes is in schema — models/postMessage.js
+
+likes: { type: [String], default: [] }, // store userIds
+
+
+client/api/index.js
+
+export const likePost = (id) => postsAPI.patch(`/posts/${id}/likePost`);
+
+
+
+Like Button Component
+Inside your Post.js card/component:
+
+import { useDispatch } from 'react-redux';
+import { likePost } from '../../actions/posts';
+
+const Post = ({ post }) => {
+  const dispatch = useDispatch();
+  const user = JSON.parse(localStorage.getItem('profile'));
+
+  const hasLiked = post.likes.includes(user?.result?._id);
+
+  const handleLike = () => {
+    dispatch(likePost(post._id));
+  };
+
+  return (
+    <button onClick={handleLike}>
+      {hasLiked ? '❤️ Unlike' : '🤍 Like'} ({post.likes.length})
+    </button>
+  );
+};
+
+
+MongoDB Schema: models/comment.js
+
+
+import mongoose from 'mongoose';
+
+const commentSchema = mongoose.Schema({
+  postId: { type: mongoose.Schema.Types.ObjectId, ref: 'PostMessage', required: true },
+  creatorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  text: { type: String, required: true },
+  createdAt: { type: Date, default: new Date() },
+});
+
+export default mongoose.model('Comment', commentSchema);
+
+
+
+models/postMessage.js
+
+
+comments: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Comment' }],
+
+
+controllers/comments.js
+
+
+import Comment from '../models/comment.js';
+import PostMessage from '../models/postMessage.js';
+
+export const createComment = async (req, res) => {
+  const { postId, text } = req.body;
+  const userId = req.userId;
+
+  try {
+    const comment = new Comment({ postId, creatorId: userId, text });
+    await comment.save();
+
+    await PostMessage.findByIdAndUpdate(postId, { $push: { comments: comment._id } });
+
+    res.status(201).json(comment);
+  } catch (error) {
+    res.status(409).json({ message: error.message });
+  }
+};
+
+
+routes/comments.js
+
+
+import express from 'express';
+import { createComment } from '../controllers/comments.js';
+import auth from '../middleware/auth.js';
+
+const router = express.Router();
+
+router.post('/', auth, createComment);
+
+export default router;
+
+
+
+client/api/comments.js
+
+
+import axios from 'axios';
+
+const API = axios.create({ baseURL: 'http://localhost:5000' });
+
+API.interceptors.request.use((req) => {
+  const profile = localStorage.getItem('profile');
+  if (profile) {
+    req.headers.Authorization = `Bearer ${JSON.parse(profile).token}`;
+  }
+  return req;
+});
+
+export const createComment = (commentData) => API.post('/comments', commentData);
+
+
+components/Comments.js
+
+
+import React, { useState } from 'react';
+import { createComment } from '../api/comments';
+
+const Comments = ({ postId }) => {
+  const [text, setText] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await createComment({ postId, text });
+    setText('');
+    // Optionally, refresh comments list
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a comment..." />
+      <button type="submit">Post Comment</button>
+    </form>
+  );
+};
+
+export default Comments;
+
+
+Backend Route: routes/profile.js
+
+import express from 'express';
+import { getUserProfile } from '../controllers/profile.js';
+import auth from '../middleware/auth.js';
+
+const router = express.Router();
+
+router.get('/:id', auth, getUserProfile);
+
+export default router;
+
+
+
+controllers/profile.js
+
+import User from '../models/User.js';
+import PostMessage from '../models/postMessage.js';
+
+export const getUserProfile = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('-password');
+    const posts = await PostMessage.find({ creatorId: req.params.id });
+
+    res.status(200).json({ user, posts });
+  } catch (error) {
+    res.status(404).json({ message: error.message });
+  }
+};
+
+
+ Frontend API: client/api/profile.js
+ export const fetchUserProfile = (id) => API.get(`/profile/${id}`);
+
+
+components/UserProfile.js
+
+import React, { useEffect, useState } from 'react';
+import { fetchUserProfile } from '../api/profile';
+
+const UserProfile = ({ userId }) => {
+  const [profileData, setProfileData] = useState({ user: {}, posts: [] });
+
+  useEffect(() => {
+    const getData = async () => {
+      const { data } = await fetchUserProfile(userId);
+      setProfileData(data);
+    };
+    getData();
+  }, [userId]);
+
+  return (
+    <div>
+      <h2>{profileData.user.name}</h2>
+      <p>{profileData.user.bio}</p>
+      <img src={profileData.user.profilePic} alt="Profile" />
+      <h3>Posts</h3>
+      {profileData.posts.map((post) => (
+        <div key={post._id}>
+          <h4>{post.title}</h4>
+          <p>{post.message}</p>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default UserProfile;
+
+
+ Real-Time Updates Using Socket.IO
+✅ Backend Setup: server/index.js
+
+import http from 'http';
+import { Server } from 'socket.io';
+import express from 'express';
+import mongoose from 'mongoose';
+import cors from 'cors';
+import postRoutes from './routes/posts.js';
+import commentRoutes from './routes/comments.js';
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+  },
+});
+
+app.use(cors());
+app.use(express.json());
+
+app.use('/posts', postRoutes);
+app.use('/comments', commentRoutes);
+
+io.on('connection', (socket) => {
+  console.log('New client connected');
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected');
+  });
+});
+
+const PORT = process.env.PORT || 5000;
+
+mongoose.connect('your_mongo_db_connection_string', { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => server.listen(PORT, () => console.log(`Server running on port: ${PORT}`)))
+  .catch((error) => console.error(error));
+
+
+Frontend Setup: client/socket.js
+
+import { io } from 'socket.io-client';
+
+const socket = io('http://localhost:5000');
+
+export default socket;
+
+Emitting Events in Backend (e.g., after creating a comment)
+In controllers/comments.js, after saving the comment:
+
+import { io } from '../server.js'; // Ensure you export io from your server
+
+io.emit('newComment', comment);
+
+
+Listening to Events in Frontend
+In components/Comments.js:
+
+import { useEffect } from 'react';
+import socket from '../socket';
+
+useEffect(() => {
+  socket.on('newComment', (comment) => {
+    // Update comments list
+ 
+::contentReference[oaicite:0]{index=0}
+ 
+
+Post Model — Add Comments
+models/postMessage.js
+
+const postSchema = mongoose.Schema({
+  title: String,
+  message: String,
+  name: String,
+  creatorId: String,
+  tags: [String],
+  selectedFile: String,
+  likes: { type: [String], default: [] },
+  comments: [{
+    userId: String,
+    userName: String,
+    text: String,
+    createdAt: {
+      type: Date,
+      default: new Date(),
+    },
+  }],
+  createdAt: {
+    type: Date,
+    default: new Date(),
+  },
+});
+
+
+routes/posts.js
+
+router.post('/:id/comment', auth, addComment);
+
+
+Comment Controller — controllers/posts.js
+
+export const addComment = async (req, res) => {
+  const { id } = req.params;
+  const { text } = req.body;
+
+  const post = await PostMessage.findById(id);
+  const user = await User.findById(req.userId);
+
+  if (!post || !user) return res.status(404).json({ message: 'Post or user not found' });
+
+  post.comments.push({
+    userId: req.userId,
+    userName: user.name,
+    text,
+  });
+
+  const updatedPost = await post.save();
+  res.status(200).json(updatedPost);
+};
+
+
+API — api/index.js
+export const commentPost = (id, text) => postsAPI.post(`/posts/${id}/comment`, { text });
+
+
+In Post.js
+
+import { commentPost } from '../../api';
+import { useState } from 'react';
+
+const Post = ({ post }) => {
+  const [comment, setComment] = useState('');
+  const [allComments, setAllComments] = useState(post.comments);
+
+  const handleComment = async () => {
+    const updatedPost = await commentPost(post._id, comment);
+    setAllComments(updatedPost.data.comments);
+    setComment('');
+  };
+
+  return (
+    <div>
+      {/* existing post stuff */}
+      <div>
+        <h4>Comments</h4>
+        {allComments.map((c, i) => (
+          <p key={i}><strong>{c.userName}:</strong> {c.text}</p>
+        ))}
+        <input value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Add a comment..." />
+        <button onClick={handleComment}>Post</button>
+      </div>
+    </div>
+  );
+};
+
+
+Add New Route — routes/profile.js
+
+router.get('/:id/posts', auth, getUserPosts);
+
+
+Add Controller
+controllers/profile.js
+
+import PostMessage from '../models/postMessage.js';
+
+export const getUserPosts = async (req, res) => {
+  const posts = await PostMessage.find({ creatorId: req.params.id }).sort({ createdAt: -1 });
+  res.status(200).json(posts);
+};
+
+
+ Profile Page (Extended)
+
+
+ import { fetchUserProfile, fetchUserPosts } from '../api/profile';
+import { useParams } from 'react-router-dom';
+
+const UserProfile = () => {
+  const { id } = useParams();
+  const [profile, setProfile] = useState(null);
+  const [posts, setPosts] = useState([]);
+
+  useEffect(() => {
+    fetchUserProfile(id).then(res => setProfile(res.data));
+    fetchUserPosts(id).then(res => setPosts(res.data));
+  }, [id]);
+
+  return (
+    <div>
+      {profile && (
+        <div>
+          <img src={profile.profilePic} width="100" />
+          <h3>{profile.name}</h3>
+          <p>{profile.bio}</p>
+        </div>
+      )}
+      <h4>Memories</h4>
+      {posts.map(post => (
+        <div key={post._id}>
+          <h5>{post.title}</h5>
+          <p>{post.message}</p>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+
+Install & Setup
+
+npm install socket.io socket.io-client
+
+Server-side — Add to index.js
+
+import http from 'http';
+import { Server } from 'socket.io';
+
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+  },
+});
+
+io.on('connection', (socket) => {
+  console.log('User connected:', socket.id);
+});
+
+app.set('io', io); // make available inside controllers
+
+
+Emit in createPost, likePost, addComment
+
+const io = req.app.get('io');
+io.emit('postsUpdated'); // or io.emit('newPost', post) for more detailed
+
+
+ Frontend — Use in Posts.js
+
+import io from 'socket.io-client';
+import { useEffect } from 'react';
+
+const socket = io('http://localhost:5000');
+
+useEffect(() => {
+  socket.on('postsUpdated', () => {
+    dispatch(getPosts()); // re-fetch posts in real-time
+  });
+
+  return () => socket.off('postsUpdated');
+}, []);
+
+
+
+
+
+
+
+
+
+
+
