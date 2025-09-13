@@ -7,7 +7,10 @@ import postRoutes from './routes/posts.js';
 import dotenv from 'dotenv';
 const app=express();
 dotenv.config();
-
+app.use(cors({
+  origin: ["http://localhost:3000", "https://your-frontend.onrender.com"], 
+  credentials: true
+}));
 
 
 app.use(bodyParser.json({limit:"30mb",extended:true}));
